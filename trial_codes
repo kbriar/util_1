@@ -1,0 +1,72 @@
+# Method 1: Simple tunnel with default permissions
+gcloud compute start-iap-tunnel streamlit-app 8501 \
+    --zone=us-west2-a \
+    --local-host-port=localhost:8502
+
+# Method 2: Use instance ID
+INSTANCE_ID=$(gcloud compute instances describe streamlit-app --zone=us-west2-a --format="value(id)")
+echo "Trying with instance ID: $INSTANCE_ID"
+
+# Method 3: Different local port
+gcloud compute start-iap-tunnel streamlit-app 8501 \
+    --zone=us-west2-a \
+    --local-host-port=localhost:8503
+---------------------------------------------------------------
+# Generate SSH key if not exists
+ssh-keygen -t rsa -f ~/.ssh/google_compute_engine -C "$(whoami)" -N ""
+
+# Add your SSH key to the instance
+gcloud compute instances add-metadata streamlit-app \
+    --zone=us-west2-a \
+    --metadata=ssh-keys="$(whoami):$(cat ~/.ssh/google_compute_engine.pub)"
+
+# Create SSH tunnel
+gcloud compute ssh streamlit-app \
+    --zone=us-west2-a \
+    -- -L 8502:localhost:8501 -N -f
+
+echo "SSH tunnel created! Access your app at: http://localhost:8502"
+--------------------------------
+# In Cloud Shell - Complete SSH tunnel setup
+echo "Setting up SSH tunnel..."
+
+# Create SSH key
+mkdir -p ~/.ssh
+ssh-keygen -t rsa -f ~/.ssh/google_compute_engine -C "$(whoami)" -N "" -q
+
+# Add to instance
+gcloud compute instances add-metadata streamlit-app \
+    --zone=us-west2-a \
+    --metadata=ssh-keys="$(whoami):$(cat ~/.ssh/google_compute_engine.pub)"
+
+# Start tunnel
+gcloud compute ssh jupyter@streamlit-app \
+    --zone=us-west2-a \
+    -- -L 8502:localhost:8501 -N -f
+
+echo "✅ SSH tunnel established!"
+echo "🎉 Access your Streamlit app at: http://localhost:8502"
+echo "📱 Your chatbot should now work with full API access!"
+
+------------------------
+
+# Create Dockerfile
+cat > Dockerfile << 'EOF'
+FROM python:3.9-slim
+WORKDIR /app
+COPY . .
+RUN pip install streamlit
+EXPOSE 8080
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
+EOF
+
+# Deploy to Cloud Run
+gcloud run deploy streamlit-chatbot \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --port 8080
+
+# Get the public URL
+gcloud run services describe streamlit-chatbot --platform managed --region us-central1 --format="value(status.url)"
